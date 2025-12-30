@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState, useRef } from "react";
+import React, { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { 
   Box, 
@@ -18,6 +18,7 @@ import CssBaseline from '@mui/material/CssBaseline';
 
 import { MapChart } from "@/components/MapChart";
 import { LabelTable } from "@/components/LabelTable";
+import { JobStatus } from "@/lib/queue";
 
 const darkTheme = createTheme({
   palette: {
@@ -41,8 +42,7 @@ type DashboardProps = {
 
 export default function Dashboard({ params }: DashboardProps) {
   const router = useRouter();
-  const [status, setStatus] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
+  const [status, setStatus] = useState<JobStatus | null>(null);
   const [selectedCountry, setSelectedCountry] = useState<string | null>(null);
   const [resolvedParams, setResolvedParams] = useState<{ id: string } | null>(null);
   
@@ -55,23 +55,19 @@ export default function Dashboard({ params }: DashboardProps) {
   useEffect(() => {
     if (!resolvedParams) return;
     
-    let interval: NodeJS.Timeout;
     const fetchStatus = async () => {
       try {
         const res = await fetch(`/api/status/${resolvedParams.id}`);
-        if (!res.ok) {
-           if (res.status === 404) {
-             // Job might have been lost on server restart (in-memory)
-             setStatus({ status: 'failed', error: 'Job not found (server may have restarted)' });
-             return;
-           }
-        }
+            if (res.status === 404) {
+              // Job might have been lost on server restart (in-memory)
+              setStatus({ status: 'failed', error: 'Job not found (server may have restarted)' } as JobStatus);
+              return;
+            }
         const data = await res.json();
         setStatus(data);
         
         if (data.status === 'completed' || data.status === 'failed') {
           clearInterval(interval);
-          setLoading(false);
         }
       } catch (err) {
         console.error(err);
@@ -79,7 +75,7 @@ export default function Dashboard({ params }: DashboardProps) {
     };
 
     fetchStatus();
-    interval = setInterval(fetchStatus, 2000);
+    const interval = setInterval(fetchStatus, 2000);
 
     return () => clearInterval(interval);
   }, [resolvedParams]);
@@ -89,7 +85,7 @@ export default function Dashboard({ params }: DashboardProps) {
     
     const rows = status.result.tableRows;
     let content = "";
-    let filename = `discogs-export-${status.username}.${format}`;
+    const filename = `discogs-export-${status.username}.${format}`;
     let type = "";
 
     if (format === 'json') {
@@ -98,13 +94,13 @@ export default function Dashboard({ params }: DashboardProps) {
     } else {
       // CSV
       const headers = ["Label", "Label ID", "Country", "Releases Owned"];
-      const csvRows = rows.map((r: any) => [
+      const csvRows = rows.map((r: { labelName: string; labelId: number; country: string; releaseCount: number }) => [
         `"${r.labelName.replace(/"/g, '""')}"`,
         r.labelId,
         r.country,
         r.releaseCount
       ]);
-      content = [headers.join(","), ...csvRows.map((r: any[]) => r.join(","))].join("\n");
+      content = [headers.join(","), ...csvRows.map((r: (string | number)[]) => r.join(","))].join("\n");
       type = "text/csv";
     }
 
@@ -128,7 +124,7 @@ export default function Dashboard({ params }: DashboardProps) {
 
   // Calculate filtered rows
   const filteredRows = selectedCountry 
-    ? status.result?.tableRows.filter((r: any) => {
+    ? (status.result?.tableRows || []).filter((r: { country: string }) => {
         if (selectedCountry === "US") return r.country === "US" || r.country === "United States";
         if (selectedCountry === "GB") return r.country === "GB" || r.country === "UK";
         return r.country === selectedCountry;
@@ -138,8 +134,19 @@ export default function Dashboard({ params }: DashboardProps) {
   return (
     <ThemeProvider theme={darkTheme}>
       <CssBaseline />
-      <Box sx={{ minHeight: '100vh', p: 4 }}>
-        <Container maxWidth="xl">
+      <Box sx={{ minHeight: '100vh' }}>
+        {/* Full-width Header Image */}
+        <Box 
+          sx={{ 
+            width: '100%', 
+            height: '50px', 
+            backgroundImage: 'url("/header.jpg")',
+            backgroundSize: 'cover',
+            backgroundPosition: 'center',
+            mb: 0
+          }} 
+        />
+        <Container maxWidth="xl" sx={{ mt: 4 }}>
           {/* Header */}
           <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 4 }}>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
