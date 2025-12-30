@@ -36,6 +36,10 @@ const darkTheme = createTheme({
   },
 });
 
+/**
+ * Landing page where users start collection analysis. Handles username input, optional OAuth
+ * connection, and passes sampling/all-label toggles to the backend so results match PRD table/map.
+ */
 export default function Home() {
   const [username, setUsername] = useState("");
   const [loading, setLoading] = useState(false);
@@ -44,6 +48,10 @@ export default function Home() {
   const [user, setUser] = useState<{ isLoggedIn: boolean; username?: string } | null>(null);
   const router = useRouter();
 
+  /**
+   * Fetch the current session to prefill username and show OAuth connection state. Mirrors the
+   * requirement that private collections use OAuth while keeping username-only mode available.
+   */
   useEffect(() => {
     fetch('/api/auth/me')
       .then(res => res.json())
@@ -53,6 +61,12 @@ export default function Home() {
       });
   }, []);
 
+  /**
+   * Kick off the analysis job by POSTing to `/api/analyze`. Accepts optional toggles for
+   * sampling (fast demo mode) and allLabels counting (double counts per PRD future toggle).
+   *
+   * @param e Form submit event from the Analyze button.
+   */
   const handleAnalyze = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!username.trim()) return;
@@ -85,10 +99,12 @@ export default function Home() {
     }
   };
 
+  /** Redirects to the Discogs OAuth login endpoint for private collection analysis. */
   const handleLogin = () => {
     window.location.href = "/api/auth/login";
   };
 
+  /** Disconnects the session and clears the username input. */
   const handleLogout = async () => {
     await fetch('/api/auth/logout', { method: 'POST' });
     setUser({ isLoggedIn: false });

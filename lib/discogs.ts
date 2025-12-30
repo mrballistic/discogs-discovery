@@ -5,7 +5,11 @@ const client = new DiscogsClient({
   userAgent: 'DiscogsDiscoveryMVP/0.1',
 });
 
-// Country buckets
+/**
+ * Country alias map used by {@link normalizeCountry} to bucket common Discogs country strings
+ * into the ISO-ish codes we chart on the map and table. Keeps Unknown/Unmapped buckets explicit
+ * per PRD guidance.
+ */
 const COUNTRY_MAPPINGS: Record<string, string> = {
   'UK': 'GB',
   'U.K.': 'GB',
@@ -17,7 +21,16 @@ const COUNTRY_MAPPINGS: Record<string, string> = {
   'Worldwide': 'Unmapped',
 };
 
-function normalizeCountry(raw: string | undefined | null): string {
+/**
+ * Normalize a raw Discogs country string into a stable bucket for aggregation.
+ * - Collapses empty values into `Unknown`
+ * - Maps well-known aliases to ISO2 codes (US/GB) or `Unmapped`
+ * - Otherwise returns the trimmed country name to avoid hiding data
+ *
+ * @param raw Raw country value returned by the Discogs API.
+ * @returns Normalized bucket name used for map shading and table grouping.
+ */
+export function normalizeCountry(raw: string | undefined | null): string {
   if (!raw || raw.trim() === '') return 'Unknown';
   const clean = raw.trim();
   if (COUNTRY_MAPPINGS[clean]) return COUNTRY_MAPPINGS[clean];
@@ -29,7 +42,14 @@ function normalizeCountry(raw: string | undefined | null): string {
 
 const RATE_LIMIT_DELAY = 1500; // Increased to 1.5s to be safer
 
-// Helper for Robust Retries
+/**
+ * Helper for robust retries against Discogs API calls. Spaces requests to reduce rate-limit risk
+ * and performs exponential-like retry behavior when the API responds with 429.
+ *
+ * @param fn Function that wraps the Discogs client call.
+ * @param retries How many 429 retries to attempt before surfacing the error.
+ * @param delay Base delay between calls to pace requests; increases when rate limited.
+ */
 async function fetchWithRetry<T>(fn: () => Promise<T>, retries = 3, delay = RATE_LIMIT_DELAY): Promise<T> {
   try {
     // Always wait the base delay before a call to space them out
@@ -48,6 +68,16 @@ async function fetchWithRetry<T>(fn: () => Promise<T>, retries = 3, delay = RATE
   }
 }
 
+/**
+ * Pull the user's collection, resolve release countries, and emit map + label table aggregates.
+ * Implements the Phase B country resolution outlined in the PRD by calling the release endpoint
+ * for each item (with optional sampling to keep work small during demos).
+ *
+ * @param jobId Identifier used to update the in-memory queue for UI polling.
+ * @param username Discogs username to analyze (public or OAuth).
+ * @param tokens OAuth credentials enabling private collection access.
+ * @param options Feature toggles (allLabels vs. primary label only, sampling for fast runs).
+ */
 export async function processCollection(
   jobId: string, 
   username: string, 
@@ -57,7 +87,10 @@ export async function processCollection(
   const job = jobQueue.get(jobId);
   if (!job) return;
 
-  // Initializing Client...
+  /**
+   * Initialize a Discogs client with either public (username-only) access or OAuth tokens when
+   * present. OAuth mode is required for private collections per PRD.
+   */
   let jobClient = client;
   if (tokens) {
       jobClient = new DiscogsClient({

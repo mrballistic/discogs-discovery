@@ -4,11 +4,12 @@ A visual exploration tool for Discogs collections. This application generates a 
 
 ## Features
 
-- **World Heatmap**: Visualizes the density of your collection across the globe.
-- **Label Breakdown**: See which labels you collect the most, and where those releases come from.
-- **Interactive Filtering**: Click on any country in the map to filter the label table.
-- **Exports**: Download your aggregated data as CSV or JSON.
-- **Dark Mode**: A premium, dark-themed UI built with Material UI.
+- **World Heatmap**: Visualizes collection density by release country (choropleth).
+- **Label Breakdown**: Table of labels with release counts and release country buckets.
+- **Interactive Filtering**: Click a country on the map to filter the table; quick search in-grid.
+- **Exports**: Download the aggregated table as CSV or JSON.
+- **Modes & Toggles**: Public username mode by default; optional Discogs OAuth for private collections. Toggle “Count All Labels” (primary vs. all labels) and “Fast Sampling” for quick demos.
+- **Dark Mode**: Premium dark UI built with MUI + MUI X DataGrid.
 
 ## Technology Stack
 
@@ -20,27 +21,38 @@ A visual exploration tool for Discogs collections. This application generates a 
 
 ## Getting Started
 
-1. **Install dependencies**:
+1. **Set environment variables** (see `env.example`):
+   - `DISCOGS_CONSUMER_KEY` / `DISCOGS_CONSUMER_SECRET` (needed for OAuth/private collections)
+   - `SESSION_PASSWORD` (32+ chars for iron-session)
+
+2. **Install dependencies**:
 
    ```bash
    npm install
    ```
 
-2. **Run the development server**:
+3. **Run the development server**:
 
    ```bash
    npm run dev
    ```
 
-3. **Open the app**:
+4. **Open the app**:
    Navigate to [http://localhost:3000](http://localhost:3000).
 
 ## Usage
 
-1. Enter your Discogs username (e.g., `milkman` or your own).
-2. Click "Analyze Collection".
-3. Wait for the analysis to complete. Consider that Discogs API rate limits are strict (60 requests/minute), so large collections may take some time.
-4. Explore your dashboard!
+1. (Optional) Click **“Connect with Discogs”** to authorize private collections; otherwise enter a public username.
+2. Choose toggles:
+   - **Count All Labels**: include secondary/sub-labels (may double-count releases).
+   - **Fast Sampling**: analyze a 100-item sample for quick demos.
+3. Click **“Analyze Collection”**. A run is queued and polled until completion (jobs live in-memory; a server restart forgets them).
+4. Explore the dashboard: click map to filter the table, sort/search, and export CSV/JSON.
+
+### Rate limits & compliance
+- Discogs API enforces strict rate limits; large collections can take time due to per-release country lookups.
+- Data attribution: “Data provided by Discogs” is shown in the UI and links back to Discogs pages.
+- Freshness: cached/aggregated data is intended for use within the Discogs 6-hour freshness window.
 
 ## License
 

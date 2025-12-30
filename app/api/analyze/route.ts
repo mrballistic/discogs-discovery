@@ -6,6 +6,13 @@ import { getIronSession } from 'iron-session';
 import { sessionOptions, SessionData } from '@/lib/session';
 import { cookies } from 'next/headers';
 
+/**
+ * Start a background analysis run. Validates username presence, seeds the in-memory job queue,
+ * and hands execution to `processCollection`, which performs the Discogs pagination + country
+ * resolution described in the PRD.
+ *
+ * @param request Next.js Request containing JSON body `{ username?, allLabels?, sampleSize? }`.
+ */
 export async function POST(request: Request) {
   try {
     const body = await request.json();

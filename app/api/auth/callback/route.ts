@@ -3,6 +3,13 @@ import { getIronSession } from 'iron-session';
 import { sessionOptions, SessionData } from '@/lib/session';
 import { cookies } from 'next/headers';
 
+/**
+ * Completes the Discogs OAuth handshake: exchanges the request token for an access token, fetches
+ * the user identity, and persists tokens in the session so backend analysis calls can access
+ * private collections without exposing secrets to the client.
+ *
+ * @param request Callback request from Discogs containing oauth_token and oauth_verifier.
+ */
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const oauthToken = searchParams.get('oauth_token');

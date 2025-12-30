@@ -9,6 +9,11 @@ export const metadata: Metadata = {
   description: "Visualize your record collection by country of origin.",
 };
 
+/**
+ * Root layout for the Next.js App Router. Applies the Inter font globally and wraps all pages.
+ *
+ * @param children Nested route content rendered inside the page body.
+ */
 export default function RootLayout({
   children,
 }: Readonly<{

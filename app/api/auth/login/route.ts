@@ -3,6 +3,10 @@ import { getIronSession } from 'iron-session';
 import { sessionOptions, SessionData } from '@/lib/session';
 import { cookies, headers } from 'next/headers';
 
+/**
+ * Initiates the Discogs OAuth 1.0a flow by requesting a request token directly from Discogs.
+ * Stores the temporary secret in the session and redirects the user to Discogs' authorize page.
+ */
 export async function GET() {
   const host = (await headers()).get('host');
   const protocol = host?.includes('localhost') || host?.includes('127.0.0.1') ? 'http' : 'https';

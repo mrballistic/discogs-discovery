@@ -5,11 +5,18 @@ import { DataGrid, GridColDef, GridToolbar, GridRenderCellParams } from '@mui/x-
 import { Box, Paper, Link as MuiLink } from '@mui/material';
 import { ExternalLink } from 'lucide-react';
 
+/**
+ * Props for the LabelTable. Rows are the aggregated label breakdown defined in `lib/queue`,
+ * wired to the DataGrid to satisfy the PRD requirement for sortable, filterable label details.
+ */
 interface LabelTableProps {
+  /** Array of label rows returned by the backend; accepts unknown to keep the component generic. */
   rows: unknown[];
+  /** Optional loading flag to show skeleton state while the job runs. */
   loading?: boolean;
 }
 
+/** Columns shown in the MUI DataGrid, aligned with PRD table requirements. */
 const columns: GridColDef[] = [
   { 
     field: 'labelName', 
@@ -47,6 +54,14 @@ const columns: GridColDef[] = [
   },
 ];
 
+/**
+ * DataGrid wrapper that renders the label breakdown table beneath the choropleth map. The grid
+ * includes quick filter, sorting, and stable IDs so that clicking a country in the map can filter
+ * the rows without re-fetching data.
+ *
+ * @param rows Label aggregation rows returned by the analysis job.
+ * @param loading Whether the table should display the built-in loading overlay.
+ */
 export function LabelTable({ rows, loading = false }: LabelTableProps) {
   return (
     <Paper sx={{ height: 600, width: '100%', background: '#171717', border: '1px solid #333' }}>

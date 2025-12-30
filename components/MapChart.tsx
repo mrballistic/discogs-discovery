@@ -5,15 +5,30 @@ import { ComposableMap, Geographies, Geography, Graticule, Sphere } from "react-
 import { scaleLinear } from "d3-scale";
 import { Box, Typography, Tooltip } from "@mui/material";
 
-// Standard ISO-110m world map
+/** Standard ISO-110m world map topojson used by react-simple-maps. */
 const GEO_URL = "https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json";
 
+/**
+ * Props for the choropleth map. Accepts normalized country buckets keyed by name/ISO code and
+ * exposes callbacks so the parent page can filter the label table when a geography is selected.
+ */
 interface MapChartProps {
-  data: Record<string, number>; // Country Name/Code -> Count
+  /** Country bucket → release count used to shade the map. */
+  data: Record<string, number>;
+  /** Handler invoked when a country is clicked; receives ISO/name or null to clear. */
   onCountryClick: (country: string | null) => void;
+  /** Current selected country (ISO/name) so the map can highlight it. */
   selectedCountry: string | null;
 }
 
+/**
+ * Choropleth map rendering release density by country. Uses a forgiving lookup to reconcile Discogs
+ * country strings with topojson naming, covering the US/GB aliasing noted in the PRD.
+ *
+ * @param data Aggregated country counts for the choropleth.
+ * @param onCountryClick Callback fired when a geography is selected.
+ * @param selectedCountry Currently selected country to highlight and filter.
+ */
 export function MapChart({ data, onCountryClick, selectedCountry }: MapChartProps) {
   // Determine max value for color scale
   const maxValue = useMemo(() => {

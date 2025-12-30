@@ -18,7 +18,7 @@ import CssBaseline from '@mui/material/CssBaseline';
 
 import { MapChart } from "@/components/MapChart";
 import { LabelTable } from "@/components/LabelTable";
-import { JobStatus } from "@/lib/queue";
+import { JobStatus, LabelRow } from "@/lib/queue";
 
 const darkTheme = createTheme({
   palette: {
@@ -40,18 +40,27 @@ type DashboardProps = {
   params: Promise<{ id: string }>;
 };
 
+/**
+ * Run dashboard that polls job status, renders the global distribution map, and presents the label
+ * breakdown table. Aligns with PRD by supporting exports, country filtering, and resilient polling.
+ *
+ * @param params Route params promise containing the job id.
+ */
 export default function Dashboard({ params }: DashboardProps) {
   const router = useRouter();
   const [status, setStatus] = useState<JobStatus | null>(null);
   const [selectedCountry, setSelectedCountry] = useState<string | null>(null);
   const [resolvedParams, setResolvedParams] = useState<{ id: string } | null>(null);
   
-  // Unwrap params
+  /** Unwrap route params (Next.js 15 passes params as a Promise). */
   useEffect(() => {
     params.then(setResolvedParams);
   }, [params]);
 
-  // Polling
+  /**
+   * Poll the status endpoint every 2s until the job completes or fails. Keeps the progress bar and
+   * map/table data in sync with backend aggregation. Stops polling when the job leaves processing.
+   */
   useEffect(() => {
     if (!resolvedParams) return;
     
@@ -80,6 +89,12 @@ export default function Dashboard({ params }: DashboardProps) {
     return () => clearInterval(interval);
   }, [resolvedParams]);
 
+  /**
+   * Export results to CSV or JSON entirely client-side to avoid extra API complexity while still
+   * fulfilling the PRD export requirement.
+   *
+   * @param format Desired export format (`csv` | `json`).
+   */
   const handleExport = (format: 'csv' | 'json') => {
     if (!status?.result?.tableRows) return;
     
@@ -94,7 +109,7 @@ export default function Dashboard({ params }: DashboardProps) {
     } else {
       // CSV
       const headers = ["Label", "Label ID", "Country", "Releases Owned"];
-      const csvRows = rows.map((r: { labelName: string; labelId: number; country: string; releaseCount: number }) => [
+      const csvRows = rows.map((r: LabelRow) => [
         `"${r.labelName.replace(/"/g, '""')}"`,
         r.labelId,
         r.country,
@@ -124,7 +139,7 @@ export default function Dashboard({ params }: DashboardProps) {
 
   // Calculate filtered rows
   const filteredRows = selectedCountry 
-    ? (status.result?.tableRows || []).filter((r: { country: string }) => {
+    ? (status.result?.tableRows || []).filter((r: LabelRow) => {
         if (selectedCountry === "US") return r.country === "US" || r.country === "United States";
         if (selectedCountry === "GB") return r.country === "GB" || r.country === "UK";
         return r.country === selectedCountry;
@@ -146,6 +161,26 @@ export default function Dashboard({ params }: DashboardProps) {
             mb: 0
           }} 
         />
+        {/* Thin Progress Bar */}
+        <Box 
+          sx={{ 
+            width: '100%', 
+            height: '2px', 
+            bgcolor: '#27272a', // Dark track
+            position: 'relative',
+            overflow: 'hidden'
+          }}
+        >
+          <Box 
+            sx={{ 
+              width: `${status.progress?.percent || 0}%`, 
+              height: '100%', 
+              bgcolor: 'primary.main', 
+              transition: 'width 0.4s ease-out',
+              boxShadow: '0 0 8px rgba(99, 102, 241, 0.6)'
+            }} 
+          />
+        </Box>
         <Container maxWidth="xl" sx={{ mt: 4 }}>
           {/* Header */}
           <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 4 }}>
