@@ -4,6 +4,7 @@ import { jobQueue, JobStatus } from '@/lib/queue';
 import { getIronSession } from 'iron-session';
 import { sessionOptions, SessionData } from '@/lib/session';
 import { cookies } from 'next/headers';
+import { Client as WorkflowClient } from '@upstash/workflow';
 
 /**
  * Start a background analysis run using Upstash Workflow. Validates username presence, seeds the job queue,
@@ -51,34 +52,34 @@ export async function POST(request: Request) {
     } : undefined;
 
     // Trigger the Upstash workflow
-    const workflowUrl = `${process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'}/api/workflow`;
-    
-    try {
-      const workflowResponse = await fetch(workflowUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${process.env.QSTASH_TOKEN}`,
-        },
-        body: JSON.stringify({
-          jobId: id,
-          username: targetUsername,
-          tokens,
-          options: { allLabels, sampleSize }
-        }),
-      });
+    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL;
+    const workflowUrl = baseUrl ? `${baseUrl}/api/workflow` : undefined;
 
-      if (!workflowResponse.ok) {
-        console.error('Workflow trigger failed:', await workflowResponse.text());
-        // Fallback to direct processing if workflow fails
+    if (!workflowUrl || !process.env.QSTASH_TOKEN) {
+      console.warn('QStash not configured (missing NEXT_PUBLIC_BASE_URL or QSTASH_TOKEN). Falling back to direct processing.');
+      const { processCollection } = await import('@/lib/discogs');
+      processCollection(id, targetUsername, tokens, { allLabels, sampleSize }).catch(console.error);
+    } else {
+      try {
+        const client = new WorkflowClient({ token: process.env.QSTASH_TOKEN });
+        await client.trigger({
+          url: workflowUrl,
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: {
+            jobId: id,
+            username: targetUsername,
+            tokens,
+            options: { allLabels, sampleSize }
+          },
+          keepTriggerConfig: true,
+        });
+      } catch (workflowError) {
+        console.error('Failed to publish workflow to QStash:', workflowError);
         const { processCollection } = await import('@/lib/discogs');
         processCollection(id, targetUsername, tokens, { allLabels, sampleSize }).catch(console.error);
       }
-    } catch (workflowError) {
-      console.error('Failed to trigger workflow:', workflowError);
-      // Fallback to direct processing
-      const { processCollection } = await import('@/lib/discogs');
-      processCollection(id, targetUsername, tokens, { allLabels, sampleSize }).catch(console.error);
     }
 
     return NextResponse.json({ runId: id });

@@ -1,8 +1,9 @@
 "use client";
 
 import React, { useMemo, useState, useEffect, useRef, useCallback } from "react";
-import { ComposableMap, Geographies, Geography, Graticule, Sphere, ZoomableGroup } from "react-simple-maps";
+import { geoGraticule, geoNaturalEarth1, geoPath } from "d3-geo";
 import { scaleLinear } from "d3-scale";
+import { feature } from "topojson-client";
 import { Box, Typography, Tooltip, IconButton, Stack } from "@mui/material";
 import { Plus, Minus, Maximize, Target } from "lucide-react";
 
@@ -53,8 +54,57 @@ interface MapChartProps {
  * @param selectedCountry Currently selected country to highlight and filter.
  */
 export function MapChart({ data, onCountryClick, selectedCountry }: MapChartProps) {
-  const [position, setPosition] = useState({ coordinates: [0, 0] as [number, number], zoom: 1 });
+  const width = 800;
+  const height = 400;
+
+  const [position, setPosition] = useState({ zoom: 1, offset: [0, 0] as [number, number] });
+  const [geographies, setGeographies] = useState<Array<{ geometry: unknown; properties: { name: string } }>>([]);
   const hasFocused = useRef(false);
+  const dragState = useRef<{
+    dragging: boolean;
+    startX: number;
+    startY: number;
+    startOffset: [number, number];
+  }>({ dragging: false, startX: 0, startY: 0, startOffset: [0, 0] });
+
+  const projection = useMemo(() => {
+    return geoNaturalEarth1()
+      .translate([width / 2, height / 2])
+      .scale(147);
+  }, [width, height]);
+
+  const path = useMemo(() => {
+    return geoPath(projection);
+  }, [projection]);
+
+  const spherePath = useMemo(() => {
+    return path({ type: "Sphere" } as never) || "";
+  }, [path]);
+
+  const graticulePath = useMemo(() => {
+    const g = geoGraticule()();
+    return path(g as never) || "";
+  }, [path]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const res = await fetch(GEO_URL);
+        const topo = await res.json();
+        const countries = feature(topo, topo.objects.countries);
+        const feats = (countries as { features?: Array<{ geometry: unknown; properties: { name: string } }> }).features || [];
+        if (!cancelled) setGeographies(feats);
+      } catch (err) {
+        console.error("Failed to load map data", err);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Determine max value for color scale
   const maxValue = useMemo(() => {
@@ -68,7 +118,7 @@ export function MapChart({ data, onCountryClick, selectedCountry }: MapChartProp
   }, [maxValue]);
 
   const handleReset = useCallback(() => {
-    setPosition({ coordinates: [0, 0], zoom: 1 });
+    setPosition({ zoom: 1, offset: [0, 0] });
   }, []);
 
   const handleFocus = useCallback(() => {
@@ -87,27 +137,41 @@ export function MapChart({ data, onCountryClick, selectedCountry }: MapChartProp
     });
 
     if (totalWeight > 0) {
+      const lon = totalLon / totalWeight;
+      const lat = totalLat / totalWeight;
+      const newZoom = 2.5;
+      const projected = projection([lon, lat]);
+      if (!projected) {
+        handleReset();
+        return;
+      }
       setPosition({
-        coordinates: [totalLon / totalWeight, totalLat / totalWeight],
-        zoom: 2.5 // Zoom in a bit to focus
+        zoom: newZoom,
+        offset: [width / 2 / newZoom - projected[0], height / 2 / newZoom - projected[1]],
       });
     } else {
       handleReset();
     }
-  }, [data, handleReset]);
+  }, [data, handleReset, height, projection, width]);
 
   const handleZoomIn = () => {
-    if (position.zoom >= 4) return;
-    setPosition((pos) => ({ ...pos, zoom: pos.zoom * 1.5 }));
+    setPosition((pos) => {
+      if (pos.zoom >= 4) return pos;
+      const nextZoom = Math.min(4, pos.zoom * 1.5);
+      const dx = (width / 2) * (1 / nextZoom - 1 / pos.zoom);
+      const dy = (height / 2) * (1 / nextZoom - 1 / pos.zoom);
+      return { zoom: nextZoom, offset: [pos.offset[0] + dx, pos.offset[1] + dy] };
+    });
   };
 
   const handleZoomOut = () => {
-    if (position.zoom <= 1) return;
-    setPosition((pos) => ({ ...pos, zoom: pos.zoom / 1.5 }));
-  };
-
-  const handleMoveEnd = (pos: { coordinates: [number, number]; zoom: number }) => {
-    setPosition(pos);
+    setPosition((pos) => {
+      if (pos.zoom <= 1) return pos;
+      const nextZoom = Math.max(1, pos.zoom / 1.5);
+      const dx = (width / 2) * (1 / nextZoom - 1 / pos.zoom);
+      const dy = (height / 2) * (1 / nextZoom - 1 / pos.zoom);
+      return { zoom: nextZoom, offset: [pos.offset[0] + dx, pos.offset[1] + dy] };
+    });
   };
 
   /** Auto-focus on first data load to 'only show relevant countries' per user request. */
@@ -118,6 +182,29 @@ export function MapChart({ data, onCountryClick, selectedCountry }: MapChartProp
         hasFocused.current = true;
     }
   }, [maxValue, handleFocus]);
+
+  const handlePointerDown = (event: React.PointerEvent<SVGSVGElement>) => {
+    dragState.current.dragging = true;
+    dragState.current.startX = event.clientX;
+    dragState.current.startY = event.clientY;
+    dragState.current.startOffset = position.offset;
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+
+  const handlePointerMove = (event: React.PointerEvent<SVGSVGElement>) => {
+    if (!dragState.current.dragging) return;
+    const dx = event.clientX - dragState.current.startX;
+    const dy = event.clientY - dragState.current.startY;
+    setPosition((pos) => ({
+      ...pos,
+      offset: [dragState.current.startOffset[0] + dx / pos.zoom, dragState.current.startOffset[1] + dy / pos.zoom],
+    }));
+  };
+
+  const handlePointerUp = (event: React.PointerEvent<SVGSVGElement>) => {
+    dragState.current.dragging = false;
+    event.currentTarget.releasePointerCapture(event.pointerId);
+  };
 
   return (
     <Box sx={{ width: "100%", height: "500px", background: "#171717", borderRadius: 4, overflow: "hidden", position: "relative" }}>
@@ -147,25 +234,18 @@ export function MapChart({ data, onCountryClick, selectedCountry }: MapChartProp
         </IconButton>
       </Stack>
 
-      <ComposableMap
-        projectionConfig={{
-          rotate: [-10, 0, 0],
-          scale: 147
-        }}
-        width={800}
-        height={400}
-        style={{ width: "100%", height: "100%" }}
+      <svg
+        viewBox={`0 0 ${width} ${height}`}
+        style={{ width: "100%", height: "100%", touchAction: "none" }}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerCancel={handlePointerUp}
       >
-        <ZoomableGroup
-          zoom={position.zoom}
-          center={position.coordinates}
-          onMoveEnd={handleMoveEnd}
-        >
-          <Sphere stroke="#3f3f46" strokeWidth={0.5} id="sphere" fill="transparent" />
-          <Graticule stroke="#3f3f46" strokeWidth={0.5} />
-          <Geographies geography={GEO_URL}>
-            {({ geographies }) =>
-              geographies.map((geo) => {
+        <g transform={`translate(${position.offset[0]}, ${position.offset[1]}) scale(${position.zoom})`}>
+          <path d={spherePath} stroke="#3f3f46" strokeWidth={0.5} fill="transparent" />
+          <path d={graticulePath} stroke="#3f3f46" strokeWidth={0.5} fill="transparent" />
+          {geographies.map((geo, idx) => {
               // Try to match country name or ISO
               // The topojson usually has geo.properties.name and geo.id (ISO 3 number) or ISO 2.
               // For robustness, we might need a lookup map if our logic is strings like "US", "GB".
@@ -209,9 +289,9 @@ export function MapChart({ data, onCountryClick, selectedCountry }: MapChartProp
                 (selectedCountry === "GB" && countryName === "United Kingdom");
 
               return (
-                <Tooltip key={geo.rsmKey} title={`${countryName}: ${matchCount} releases`}>
-                  <Geography
-                    geography={geo}
+                <Tooltip key={`${countryName}-${idx}`} title={`${countryName}: ${matchCount} releases`}>
+                  <path
+                    d={path(geo as never) || ""}
                     onClick={() => {
                         // Return the standardized code if possible, or the name
                         if (countryName === "United States of America") onCountryClick("US");
@@ -221,19 +301,21 @@ export function MapChart({ data, onCountryClick, selectedCountry }: MapChartProp
                     fill={matchCount > 0 ? colorScale(matchCount) : "#27272a"}
                     stroke={isSelected ? "#fff" : "#52525b"}
                     strokeWidth={isSelected ? 2 : 0.5}
-                    style={{
-                      default: { outline: "none" },
-                      hover: { fill: "#4f46e5", outline: "none", cursor: "pointer" },
-                      pressed: { outline: "none" },
+                    style={{ outline: "none" }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.cursor = "pointer";
+                      e.currentTarget.style.fill = "#4f46e5";
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.cursor = "default";
+                      e.currentTarget.style.fill = matchCount > 0 ? colorScale(matchCount) : "#27272a";
                     }}
                   />
                 </Tooltip>
               );
-            })
-          }
-        </Geographies>
-      </ZoomableGroup>
-    </ComposableMap>
+            })}
+        </g>
+      </svg>
       
       {/* Legend / Info */}
       <Box sx={{ position: "absolute", bottom: 16, left: 16, background: "rgba(0,0,0,0.7)", p: 1, borderRadius: 1 }}>
