@@ -84,7 +84,7 @@ export async function processCollection(
   tokens?: { accessToken: string; accessTokenSecret: string },
   options?: { allLabels?: boolean; sampleSize?: number }
 ) {
-  const job = jobQueue.get(jobId);
+  const job = await jobQueue.get(jobId);
   if (!job) return;
 
   /**
@@ -112,6 +112,7 @@ export async function processCollection(
   try {
     job.status = 'processing';
     job.progress.message = 'Fetching collection list...';
+    await jobQueue.set(jobId, job);
     
     const firstPageRes = await fetchWithRetry(() => 
       jobClient.user().collection().getReleases(username, 0, { page: 1, per_page: 50 })
@@ -132,12 +133,14 @@ export async function processCollection(
       job.progress.pagesFetched = p;
       job.progress.percent = 5 + (p / totalPages) * 10; // First 15% is fetching list
       job.progress.message = `Fetching page ${p} of ${totalPages}`;
+      await jobQueue.set(jobId, job);
     }
 
     // 3. APPLY SAMPLING
     let releasesToAnalyze = allReleases;
     if (sampleSize && sampleSize < allReleases.length) {
         job.progress.message = `Sampling ${sampleSize} random items from ${allReleases.length}...`;
+        await jobQueue.set(jobId, job);
         // Simple shuffle
         releasesToAnalyze = [...allReleases]
             .sort(() => Math.random() - 0.5)
@@ -146,6 +149,7 @@ export async function processCollection(
 
     const totalToProcess = releasesToAnalyze.length;
     job.progress.totalReleases = totalToProcess;
+    await jobQueue.set(jobId, job);
 
     const countryCounts: Record<string, number> = {};
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -191,6 +195,11 @@ export async function processCollection(
       job.progress.releasesProcessed = processed;
       job.progress.percent = 15 + (processed / totalToProcess) * 85;
       job.progress.message = `Analyzing ${processed} of ${totalToProcess} (Sampling enabled: ${!!sampleSize})`;
+      
+      // Update every 5 items to reduce KV call frequency while maintaining responsiveness
+      if (processed % 5 === 0 || processed === totalToProcess) {
+        await jobQueue.set(jobId, job);
+      }
     }
 
     job.result = {
@@ -200,11 +209,13 @@ export async function processCollection(
     job.status = 'completed';
     job.progress.percent = 100;
     job.progress.message = 'Complete';
+    await jobQueue.set(jobId, job);
     
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
   } catch (error: any) {
     console.error("Job failed", error);
     job.status = 'failed';
     job.error = error.message || "Unknown Error";
+    await jobQueue.set(jobId, job);
   }
 }

@@ -13,7 +13,7 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> } // In Next.js 15, params is a Promise
 ) {
   const { id } = await params;
-  const job = jobQueue.get(id);
+  const job = await jobQueue.get(id);
 
   if (!job) {
     return NextResponse.json({ error: 'Job not found' }, { status: 404 });

@@ -8,6 +8,12 @@ jest.mock('@/lib/discogs')
 jest.mock('iron-session')
 jest.mock('next/headers')
 jest.mock('uuid', () => ({ v4: () => 'test-uuid' }))
+jest.mock('@/lib/queue', () => ({
+  jobQueue: {
+    set: jest.fn().mockResolvedValue(undefined),
+    get: jest.fn().mockResolvedValue(undefined),
+  }
+}))
 
 /** Unit coverage for the analyze route to ensure validation and job bootstrapping behave as expected. */
 describe('POST /api/analyze', () => {

@@ -45,7 +45,7 @@ export async function POST(request: Request) {
       createdAt: Date.now(),
     };
 
-    jobQueue.set(id, job);
+    await jobQueue.set(id, job);
 
     const tokens = isLoggedIn ? {
       accessToken: session.user.accessToken,

@@ -1,62 +1,114 @@
+import { createClient } from 'redis';
+
 /**
  * Row model used by the DataGrid to display label-level aggregation results.
  * Each row represents the count of releases owned for a given label and release country.
  */
 export interface LabelRow {
-  /** Unique key combining label id and country bucket to make DataGrid deterministic. */
   key: string;
-  /** Discogs label identifier used to build outbound links. */
   labelId: number;
-  /** Human-readable label name supplied by the Discogs API. */
   labelName: string;
-  /** Country bucket derived from the release country (normalized). */
   country: string;
-  /** Number of releases owned for this label and country combination. */
   releaseCount: number;
 }
 
 /**
- * Lifecycle state for an analysis job. Jobs are kept in-memory per PRD to drive the map + table UX.
+ * Lifecycle state for an analysis job.
  */
 export type JobStatus = {
-  /** Server-generated id used by the client to poll `/api/status/[id]`. */
   id: string;
-  /** Discogs username being analyzed (public or via OAuth). */
   username: string;
-  /** State machine for progress UI. */
   status: 'pending' | 'processing' | 'completed' | 'failed';
-  /** Fine-grained progress metrics used to render the thin progress bar and poller messaging. */
   progress: {
     message: string;
     percent: number;
     pagesFetched: number;
-    /** Total collection pages; initialized after the first Discogs request. */
     totalPages: number;
     releasesProcessed: number;
     totalReleases: number;
   };
-  /** Aggregated outputs that power the map and table views. */
   result?: {
-    /** Country → release count choropleth data (unknown/unmapped included). */
     mapData: Record<string, number>;
-    /** Table rows sorted by releaseCount to align with PRD requirements. */
     tableRows: LabelRow[];
   };
-  /** Human-readable error string returned to the client if the job fails. */
   error?: string;
-  /** Timestamp used for TTL logic or future cleanup of stale runs. */
   createdAt: number;
 };
 
-/** Use globalThis to persist queue across HMR in development. */
-const globalForQueue = globalThis as unknown as {
-  jobQueue: Map<string, JobStatus>;
-};
-
 /**
- * In-memory job queue backing the MVP. Keeps state between API calls and survives dev HMR by
- * storing on `globalThis`. Production deployments should replace with a shared store/queue.
+ * Persistence layer for analysis jobs using the 'redis' package.
  */
-export const jobQueue = globalForQueue.jobQueue || new Map<string, JobStatus>();
+class JobQueueStore {
+  private memoryMap: Map<string, JobStatus>;
+  private client: ReturnType<typeof createClient> | null = null;
+  private isConnecting = false;
 
-if (process.env.NODE_ENV !== 'production') globalForQueue.jobQueue = jobQueue;
+  constructor() {
+    // Survive HMR in dev
+    const globalForQueue = globalThis as unknown as { jobQueueMap: Map<string, JobStatus> };
+    if (!globalForQueue.jobQueueMap) {
+      globalForQueue.jobQueueMap = new Map();
+    }
+    this.memoryMap = globalForQueue.jobQueueMap;
+  }
+
+  private async getClient() {
+    const redisUrl = process.env.KV_URL || process.env.REDIS_URL;
+    
+    if (!redisUrl) return null;
+
+    if (this.client) return this.client;
+
+    if (this.isConnecting) {
+      // Small wait to avoid double connection attempts
+      await new Promise(resolve => setTimeout(resolve, 100));
+      return this.client;
+    }
+
+    this.isConnecting = true;
+    try {
+      const client = createClient({ url: redisUrl });
+      client.on('error', (err) => console.error('Redis Client Error', err));
+      await client.connect();
+      this.client = client;
+      console.log('JobQueue: Connected to Redis.');
+      return this.client;
+    } catch (err) {
+      console.error('Redis Connection Error:', err);
+      return null;
+    } finally {
+      this.isConnecting = false;
+    }
+  }
+
+  async get(id: string): Promise<JobStatus | undefined> {
+    const client = await this.getClient();
+    if (client) {
+      try {
+        const data = await client.get(`job:${id}`);
+        return data ? JSON.parse(data) : undefined;
+      } catch (err) {
+        console.error('Redis Error (get):', err);
+        return this.memoryMap.get(id);
+      }
+    }
+    return this.memoryMap.get(id);
+  }
+
+  async set(id: string, job: JobStatus): Promise<void> {
+    this.memoryMap.set(id, job);
+    const client = await this.getClient();
+    if (client) {
+      try {
+        // Sets a 24h expiration on jobs
+        await client.set(`job:${id}`, JSON.stringify(job), {
+          EX: 60 * 60 * 24
+        });
+      } catch (err) {
+        console.error('Redis Error (set):', err);
+      }
+    }
+  }
+}
+
+export const jobQueue = new JobQueueStore();
