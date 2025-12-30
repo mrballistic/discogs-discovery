@@ -52,13 +52,12 @@ export async function processCollection(
   jobId: string, 
   username: string, 
   tokens?: { accessToken: string; accessTokenSecret: string },
-  options?: { allLabels?: boolean }
+  options?: { allLabels?: boolean; sampleSize?: number }
 ) {
   const job = jobQueue.get(jobId);
   if (!job) return;
 
-  // Initializing Client:
-  // If we have tokens, use them! This allows private collection access.
+  // Initializing Client...
   let jobClient = client;
   if (tokens) {
       jobClient = new DiscogsClient({
@@ -75,27 +74,22 @@ export async function processCollection(
   }
 
   const allLabelsMode = !!options?.allLabels;
+  const sampleSize = options?.sampleSize;
 
   try {
     job.status = 'processing';
-    job.progress.message = 'Fetching collection...';
+    job.progress.message = 'Fetching collection list...';
     
-    // 1. Fetch First Page to get totals
-    // Using folder 0 (All)
     const firstPageRes = await fetchWithRetry(() => 
       jobClient.user().collection().getReleases(username, 0, { page: 1, per_page: 50 })
     );
     const firstPage = firstPageRes.data;
     const totalPages = firstPage.pagination.pages;
-    const totalItems = firstPage.pagination.items;
-    
-    job.progress.totalPages = totalPages;
-    job.progress.totalReleases = totalItems;
     
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let allReleases: any[] = [...firstPage.releases];
     
-    // 2. Fetch remaining pages
+    // Fetch remaining pages (this part is relatively fast)
     for (let p = 2; p <= totalPages; p++) {
       const pageRes = await fetchWithRetry(() => 
         jobClient.user().collection().getReleases(username, 0, { page: p, per_page: 50 })
@@ -103,40 +97,44 @@ export async function processCollection(
       allReleases = allReleases.concat(pageRes.data.releases);
       
       job.progress.pagesFetched = p;
-      job.progress.percent = 10 + (p / totalPages) * 20; // First 30% is fetching
+      job.progress.percent = 5 + (p / totalPages) * 10; // First 15% is fetching list
       job.progress.message = `Fetching page ${p} of ${totalPages}`;
     }
 
-    // 3. Process Releases (Get Country)
-    // We need to fetch details for each release to get country.
-    // This is the heavy part.
-    
-    // Map to aggregate data
+    // 3. APPLY SAMPLING
+    let releasesToAnalyze = allReleases;
+    if (sampleSize && sampleSize < allReleases.length) {
+        job.progress.message = `Sampling ${sampleSize} random items from ${allReleases.length}...`;
+        // Simple shuffle
+        releasesToAnalyze = [...allReleases]
+            .sort(() => Math.random() - 0.5)
+            .slice(0, sampleSize);
+    }
+
+    const totalToProcess = releasesToAnalyze.length;
+    job.progress.totalReleases = totalToProcess;
+
     const countryCounts: Record<string, number> = {};
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const tableRowsMap = new Map<string, any>();
     
     let processed = 0;
     
-    for (const item of allReleases) {
+    for (const item of releasesToAnalyze) {
       const releaseId = item.id;
       
       let country = 'Unknown';
       try {
-        // Fetch with Retry
         const dbReleaseRes = await fetchWithRetry(() => 
           jobClient.database().getRelease(releaseId)
         );
         country = normalizeCountry(dbReleaseRes.data.country);
       } catch (err: unknown) {
         console.error(`Failed to fetch release ${releaseId}`, err);
-        // Keep unknown
       }
       
-      // Aggregates for Map
       countryCounts[country] = (countryCounts[country] || 0) + 1;
       
-      // Table Row Logic
       const basicInfo = item.basic_information;
       const labelsToProcess = allLabelsMode ? (basicInfo.labels || []) : [basicInfo.labels?.[0]].filter(Boolean);
       
@@ -158,8 +156,8 @@ export async function processCollection(
 
       processed++;
       job.progress.releasesProcessed = processed;
-      job.progress.percent = 30 + (processed / (totalItems || 1)) * 70;
-      job.progress.message = `Analyzing release ${processed} of ${totalItems}`;
+      job.progress.percent = 15 + (processed / totalToProcess) * 85;
+      job.progress.message = `Analyzing ${processed} of ${totalToProcess} (Sampling enabled: ${!!sampleSize})`;
     }
 
     job.result = {

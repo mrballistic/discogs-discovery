@@ -9,7 +9,7 @@ import { cookies } from 'next/headers';
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { username, allLabels } = body;
+    const { username, allLabels, sampleSize } = body;
 
     const session = await getIronSession<SessionData>(await cookies(), sessionOptions);
     const isLoggedIn = !!session.user;
@@ -46,7 +46,7 @@ export async function POST(request: Request) {
     } : undefined;
 
     // Start processing
-    processCollection(id, targetUsername, tokens).catch(console.error);
+    processCollection(id, targetUsername, tokens, { allLabels, sampleSize }).catch(console.error);
 
     return NextResponse.json({ runId: id });
   } catch (error) {

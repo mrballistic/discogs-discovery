@@ -2,14 +2,16 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { 
-  TextField, 
-  Button, 
-  Container, 
-  Typography, 
-  Box, 
-  Paper, 
-  CircularProgress 
+import {
+  TextField,
+  Button,
+  Container,
+  Typography,
+  Box,
+  Paper,
+  CircularProgress,
+  FormControlLabel, // Added
+  Checkbox, // Added
 } from "@mui/material";
 import { Search } from "lucide-react";
 import { createTheme, ThemeProvider } from '@mui/material/styles';
@@ -37,6 +39,8 @@ const darkTheme = createTheme({
 export default function Home() {
   const [username, setUsername] = useState("");
   const [loading, setLoading] = useState(false);
+  const [allLabels, setAllLabels] = useState(false);
+  const [samplingEnabled, setSamplingEnabled] = useState(false);
   const [user, setUser] = useState<{ isLoggedIn: boolean; username?: string } | null>(null);
   const router = useRouter();
 
@@ -60,7 +64,11 @@ export default function Home() {
         headers: { "Content-Type": "application/json" },
         // If logged in and username matches self, or empty, backend handles it.
         // We explicitly send username if user typed it.
-        body: JSON.stringify({ username: username.trim() }),
+        body: JSON.stringify({ 
+          username: username.trim(),
+          allLabels,
+          sampleSize: samplingEnabled ? 100 : undefined
+        }),
       });
       
       const data = await res.json();
@@ -159,11 +167,43 @@ export default function Home() {
                 onChange={(e) => setUsername(e.target.value)}
                 helperText={user?.isLoggedIn ? "You can analyze other users too, or leave simple to analyze yourself." : "Enter a public username."}
                 sx={{ 
-                  mb: 3,
+                  mb: 1,
                   '& .MuiOutlinedInput-root': {
                     borderRadius: 2,
                   }
                 }}
+              />
+              <FormControlLabel
+                control={
+                  <Checkbox 
+                    checked={allLabels} 
+                    onChange={(e) => setAllLabels(e.target.checked)} 
+                    color="primary"
+                    sx={{ color: '#444' }}
+                  />
+                }
+                label={
+                  <Typography variant="body2" color="text.secondary">
+                    Count All Labels (Includes secondary/sub-labels)
+                  </Typography>
+                }
+                sx={{ mb: 1, ml: 0 }}
+              />
+              <FormControlLabel
+                control={
+                  <Checkbox 
+                    checked={samplingEnabled} 
+                    onChange={(e) => setSamplingEnabled(e.target.checked)} 
+                    color="primary"
+                    sx={{ color: '#444' }}
+                  />
+                }
+                label={
+                  <Typography variant="body2" color="text.secondary">
+                    Fast Sampling (Limit analyze to 100 random items)
+                  </Typography>
+                }
+                sx={{ mb: 3, ml: 0, width: '100%' }}
               />
               <Button
                 fullWidth
