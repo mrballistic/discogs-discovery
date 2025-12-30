@@ -1,9 +1,32 @@
 "use client";
 
-import React, { useMemo } from "react";
-import { ComposableMap, Geographies, Geography, Graticule, Sphere } from "react-simple-maps";
+import React, { useMemo, useState, useEffect, useRef, useCallback } from "react";
+import { ComposableMap, Geographies, Geography, Graticule, Sphere, ZoomableGroup } from "react-simple-maps";
 import { scaleLinear } from "d3-scale";
-import { Box, Typography, Tooltip } from "@mui/material";
+import { Box, Typography, Tooltip, IconButton, Stack } from "@mui/material";
+import { Plus, Minus, Maximize, Target } from "lucide-react";
+
+/** Simplified coordinate lookup for auto-focusing on common regions. */
+const COUNTRY_COORDS: Record<string, [number, number]> = {
+  "US": [-95, 37],
+  "GB": [-2, 54],
+  "Germany": [10, 51],
+  "France": [2, 46],
+  "Japan": [138, 36],
+  "Canada": [-106, 56],
+  "Australia": [133, -25],
+  "Netherlands": [5, 52],
+  "Italy": [12, 41],
+  "Spain": [-3, 40],
+  "Brazil": [-51, -14],
+  "China": [104, 35],
+  "Russia": [105, 61],
+  "South Africa": [24, -28],
+  "Mexico": [-102, 23],
+  "Sweden": [18, 60],
+  "Norway": [8, 60],
+  "Finland": [25, 61],
+};
 
 /** Standard ISO-110m world map topojson used by react-simple-maps. */
 const GEO_URL = "https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json";
@@ -30,17 +53,100 @@ interface MapChartProps {
  * @param selectedCountry Currently selected country to highlight and filter.
  */
 export function MapChart({ data, onCountryClick, selectedCountry }: MapChartProps) {
+  const [position, setPosition] = useState({ coordinates: [0, 0] as [number, number], zoom: 1 });
+  const hasFocused = useRef(false);
+
   // Determine max value for color scale
   const maxValue = useMemo(() => {
     return Math.max(0, ...Object.values(data));
   }, [data]);
 
-  const colorScale = scaleLinear<string>()
-    .domain([0, maxValue || 1])
-    .range(["#27272a", "#6366f1"]); // zinc-800 to primary color
+  const colorScale = useMemo(() => {
+    return scaleLinear<string>()
+      .domain([0, maxValue || 1])
+      .range(["#27272a", "#6366f1"]); // zinc-800 to primary color
+  }, [maxValue]);
+
+  const handleReset = useCallback(() => {
+    setPosition({ coordinates: [0, 0], zoom: 1 });
+  }, []);
+
+  const handleFocus = useCallback(() => {
+    let totalLon = 0;
+    let totalLat = 0;
+    let totalWeight = 0;
+
+    Object.entries(data).forEach(([name, count]) => {
+      // Use coordinate lookup for standard codes or the name itself if it's in our map
+      const coords = COUNTRY_COORDS[name];
+      if (count > 0 && coords) {
+        totalLon += coords[0] * count;
+        totalLat += coords[1] * count;
+        totalWeight += count;
+      }
+    });
+
+    if (totalWeight > 0) {
+      setPosition({
+        coordinates: [totalLon / totalWeight, totalLat / totalWeight],
+        zoom: 2.5 // Zoom in a bit to focus
+      });
+    } else {
+      handleReset();
+    }
+  }, [data, handleReset]);
+
+  const handleZoomIn = () => {
+    if (position.zoom >= 4) return;
+    setPosition((pos) => ({ ...pos, zoom: pos.zoom * 1.5 }));
+  };
+
+  const handleZoomOut = () => {
+    if (position.zoom <= 1) return;
+    setPosition((pos) => ({ ...pos, zoom: pos.zoom / 1.5 }));
+  };
+
+  const handleMoveEnd = (pos: { coordinates: [number, number]; zoom: number }) => {
+    setPosition(pos);
+  };
+
+  /** Auto-focus on first data load to 'only show relevant countries' per user request. */
+  useEffect(() => {
+    if (maxValue > 0 && !hasFocused.current) {
+        // eslint-disable-next-line react-hooks/set-state-in-effect
+        handleFocus();
+        hasFocused.current = true;
+    }
+  }, [maxValue, handleFocus]);
 
   return (
     <Box sx={{ width: "100%", height: "500px", background: "#171717", borderRadius: 4, overflow: "hidden", position: "relative" }}>
+      {/* Zoom Controls */}
+      <Stack 
+        sx={{ 
+          position: "absolute", 
+          top: 16, 
+          right: 16, 
+          zIndex: 10, 
+          bgcolor: "rgba(0,0,0,0.6)", 
+          borderRadius: 2,
+          p: 0.5
+        }}
+      >
+        <IconButton onClick={handleZoomIn} size="small" sx={{ color: "#fff" }} title="Zoom In">
+          <Plus size={18} />
+        </IconButton>
+        <IconButton onClick={handleZoomOut} size="small" sx={{ color: "#fff" }} title="Zoom Out">
+          <Minus size={18} />
+        </IconButton>
+        <IconButton onClick={handleReset} size="small" sx={{ color: "#fff" }} title="Zoom to World">
+          <Maximize size={18} />
+        </IconButton>
+        <IconButton onClick={handleFocus} size="small" sx={{ color: "#fff" }} title="Focus on Collection">
+          <Target size={18} />
+        </IconButton>
+      </Stack>
+
       <ComposableMap
         projectionConfig={{
           rotate: [-10, 0, 0],
@@ -50,11 +156,16 @@ export function MapChart({ data, onCountryClick, selectedCountry }: MapChartProp
         height={400}
         style={{ width: "100%", height: "100%" }}
       >
-        <Sphere stroke="#3f3f46" strokeWidth={0.5} id="sphere" fill="transparent" />
-        <Graticule stroke="#3f3f46" strokeWidth={0.5} />
-        <Geographies geography={GEO_URL}>
-          {({ geographies }) =>
-            geographies.map((geo) => {
+        <ZoomableGroup
+          zoom={position.zoom}
+          center={position.coordinates}
+          onMoveEnd={handleMoveEnd}
+        >
+          <Sphere stroke="#3f3f46" strokeWidth={0.5} id="sphere" fill="transparent" />
+          <Graticule stroke="#3f3f46" strokeWidth={0.5} />
+          <Geographies geography={GEO_URL}>
+            {({ geographies }) =>
+              geographies.map((geo) => {
               // Try to match country name or ISO
               // The topojson usually has geo.properties.name and geo.id (ISO 3 number) or ISO 2.
               // For robustness, we might need a lookup map if our logic is strings like "US", "GB".
@@ -121,7 +232,8 @@ export function MapChart({ data, onCountryClick, selectedCountry }: MapChartProp
             })
           }
         </Geographies>
-      </ComposableMap>
+      </ZoomableGroup>
+    </ComposableMap>
       
       {/* Legend / Info */}
       <Box sx={{ position: "absolute", bottom: 16, left: 16, background: "rgba(0,0,0,0.7)", p: 1, borderRadius: 1 }}>
