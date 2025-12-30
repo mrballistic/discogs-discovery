@@ -7,7 +7,8 @@ A visual exploration tool for Discogs collections. This application generates a 
 - **World Heatmap**: Visualizes collection density by release country (choropleth).
 - **Label Breakdown**: Table of labels with release counts and release country buckets.
 - **Interactive Filtering**: Click a country on the map to filter the table; quick search in-grid.
-- **Exports**: Download the aggregated table as CSV or JSON.
+- **Exports**: Download results as JSON or a richer CSV (`rich-csv-v2`) that includes metadata, map data, and table rows.
+- **Import CSV/JSON**: Upload a previously exported JSON/CSV to instantly recreate a completed run (skips Discogs API calls).
 - **Modes & Toggles**: Public username mode by default; optional Discogs OAuth for private collections. Toggle “Count All Labels” (primary vs. all labels) and “Fast Sampling” for quick demos.
 - **Dark Mode**: Premium dark UI built with MUI + MUI X DataGrid.
 
@@ -84,7 +85,13 @@ The application uses Upstash Workflow for resilient background processing of col
    - **Count All Labels**: include secondary/sub-labels (may double-count releases).
    - **Fast Sampling**: analyze a 100-item sample for quick demos.
 3. Click **“Analyze Collection”**. A run is queued and polled until completion (jobs live in-memory; a server restart forgets them).
-4. Explore the dashboard: click map to filter the table, sort/search, and export CSV/JSON.
+4. Optional: Click **“Import CSV/JSON”** on the home page to upload a previous export and instantly recreate a completed run.
+5. Explore the dashboard: click map to filter the table, sort/search, and export CSV/JSON.
+
+### Export formats
+
+- **JSON**: Full-fidelity export including metadata, `mapData`, and `tableRows`.
+- **CSV (`rich-csv-v2`)**: Multi-section CSV that includes metadata, a `MAPDATA` section, and a `TABLEROWS` section. This is designed to round-trip through the import flow.
 
 ### Rate limits & compliance
 - Discogs API enforces strict rate limits; large collections can take time due to per-release country lookups.

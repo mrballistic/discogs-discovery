@@ -104,18 +104,62 @@ export default function Dashboard({ params }: DashboardProps) {
     let type = "";
 
     if (format === 'json') {
-      content = JSON.stringify(rows, null, 2);
+      // Include metadata for upload functionality
+      const exportData = {
+        metadata: {
+          username: status.username,
+          exportedAt: new Date().toISOString(),
+          totalReleases: rows.reduce((sum, row) => sum + row.releaseCount, 0),
+          totalCountries: Object.keys(status.result.mapData || {}).length,
+          totalLabels: rows.length,
+        },
+        mapData: status.result.mapData,
+        tableRows: rows,
+      };
+      content = JSON.stringify(exportData, null, 2);
       type = "application/json";
     } else {
-      // CSV
-      const headers = ["Label", "Label ID", "Country", "Releases Owned"];
-      const csvRows = rows.map((r: LabelRow) => [
-        `"${r.labelName.replace(/"/g, '""')}"`,
-        r.labelId,
-        r.country,
-        r.releaseCount
-      ]);
-      content = [headers.join(","), ...csvRows.map((r: (string | number)[]) => r.join(","))].join("\n");
+      const timestamp = new Date().toISOString();
+      const totalReleases = rows.reduce((sum, row) => sum + row.releaseCount, 0);
+      const mapData = status.result.mapData || {};
+
+      const escape = (v: string | number) => {
+        const s = String(v);
+        if (/[",\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+        return s;
+      };
+
+      const headerLines = [
+        `# Discogs Discovery Export`,
+        `# Format: rich-csv-v2`,
+        `# Username: ${status.username}`,
+        `# ExportedAt: ${timestamp}`,
+        `# TotalReleases: ${totalReleases}`,
+        `# TotalCountries: ${Object.keys(mapData).length}`,
+        `# TotalLabels: ${rows.length}`,
+      ];
+
+      const mapSection = [
+        `# SECTION: MAPDATA`,
+        `Country,ReleaseCount`,
+        ...Object.entries(mapData)
+          .sort((a, b) => (b[1] || 0) - (a[1] || 0))
+          .map(([country, count]) => `${escape(country)},${escape(count)}`),
+      ];
+
+      const tableSection = [
+        `# SECTION: TABLEROWS`,
+        `Key,Label,LabelId,Country,ReleaseCount`,
+        ...rows.map((r: LabelRow) => [
+          escape(r.key),
+          escape(r.labelName),
+          escape(r.labelId),
+          escape(r.country),
+          escape(r.releaseCount),
+        ].join(',')),
+      ];
+
+      content = [...headerLines, '', ...mapSection, '', ...tableSection, ''].join("\n");
       type = "text/csv";
     }
 
@@ -197,6 +241,9 @@ export default function Dashboard({ params }: DashboardProps) {
                 <Typography component="span" variant="h4" sx={{ color: '#666', mx: 1 }}>/</Typography>
                 <Typography component="span" variant="h5" sx={{ color: '#a1a1aa' }}>Collection Analysis</Typography>
               </Typography>
+              {status.isUploaded && (
+                <Chip size="small" label="Uploaded" color="secondary" variant="outlined" />
+              )}
             </Box>
             
             <Box sx={{ display: 'flex', gap: 2 }}>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import {
   TextField,
@@ -12,8 +12,10 @@ import {
   CircularProgress,
   FormControlLabel, // Added
   Checkbox, // Added
+  Divider,
+  Alert,
 } from "@mui/material";
-import { Search } from "lucide-react";
+import { Search, Upload } from "lucide-react";
 import { createTheme, ThemeProvider } from '@mui/material/styles';
 import CssBaseline from '@mui/material/CssBaseline';
 
@@ -46,6 +48,8 @@ export default function Home() {
   const [allLabels, setAllLabels] = useState(false);
   const [samplingEnabled, setSamplingEnabled] = useState(false);
   const [user, setUser] = useState<{ isLoggedIn: boolean; username?: string } | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const router = useRouter();
 
   /**
@@ -67,7 +71,7 @@ export default function Home() {
    *
    * @param e Form submit event from the Analyze button.
    */
-  const handleAnalyze = async (e: React.FormEvent) => {
+  const handleAnalyze = async (e: FormEvent) => {
     e.preventDefault();
     if (!username.trim()) return;
 
@@ -97,6 +101,44 @@ export default function Home() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleFileSelect = (file: File | null) => {
+    if (!file) return;
+    // Fire and forget; UI is locked by `uploading`
+    void (async () => {
+      setUploadError(null);
+      setUploading(true);
+      try {
+        const formData = new FormData();
+        formData.append('file', file);
+
+        const res = await fetch('/api/upload', {
+          method: 'POST',
+          body: formData,
+        });
+
+        const data: unknown = await res.json();
+        if (!res.ok) {
+          const message = (data as { error?: string })?.error || 'Upload failed';
+          setUploadError(message);
+          return;
+        }
+
+        const runId = (data as { runId?: string })?.runId;
+        if (!runId) {
+          setUploadError('Upload succeeded but no runId returned');
+          return;
+        }
+
+        router.push(`/run/${runId}`);
+      } catch (err) {
+        console.error(err);
+        setUploadError('Upload failed');
+      } finally {
+        setUploading(false);
+      }
+    })();
   };
 
   /** Redirects to the Discogs OAuth login endpoint for private collection analysis. */
@@ -237,6 +279,36 @@ export default function Home() {
                 }}
               >
                 {loading ? "Initializing..." : "Analyze Collection"}
+              </Button>
+
+              <Divider sx={{ my: 3, borderColor: '#2a2a2a' }} />
+
+              {uploadError && (
+                <Alert severity="error" sx={{ mb: 2 }}>
+                  {uploadError}
+                </Alert>
+              )}
+
+              <Button
+                fullWidth
+                variant="outlined"
+                component="label"
+                startIcon={<Upload />}
+                sx={{ borderColor: '#333' }}
+                disabled={uploading}
+              >
+                {uploading ? 'Importing…' : 'Import CSV/JSON'}
+                <input
+                  type="file"
+                  accept=".json,.csv,application/json,text/csv"
+                  hidden
+                  onChange={(e) => {
+                    const f = e.target.files?.[0] ?? null;
+                    handleFileSelect(f);
+                    // allow re-selecting same file
+                    e.currentTarget.value = '';
+                  }}
+                />
               </Button>
             </Box>
           </Paper>

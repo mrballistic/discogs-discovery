@@ -33,6 +33,9 @@ export type JobStatus = {
   };
   error?: string;
   createdAt: number;
+  isUploaded?: boolean;
+  uploadedAt?: string;
+  originalExportDate?: string;
 };
 
 /**
