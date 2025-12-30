@@ -1,15 +1,13 @@
 import { NextResponse } from 'next/server';
 import { v4 as uuidv4 } from 'uuid';
-import { processCollection } from '@/lib/discogs';
 import { jobQueue, JobStatus } from '@/lib/queue';
 import { getIronSession } from 'iron-session';
 import { sessionOptions, SessionData } from '@/lib/session';
 import { cookies } from 'next/headers';
 
 /**
- * Start a background analysis run. Validates username presence, seeds the in-memory job queue,
- * and hands execution to `processCollection`, which performs the Discogs pagination + country
- * resolution described in the PRD.
+ * Start a background analysis run using Upstash Workflow. Validates username presence, seeds the job queue,
+ * and triggers the workflow endpoint for resilient processing.
  *
  * @param request Next.js Request containing JSON body `{ username?, allLabels?, sampleSize? }`.
  */
@@ -52,8 +50,36 @@ export async function POST(request: Request) {
       accessTokenSecret: session.user.accessTokenSecret
     } : undefined;
 
-    // Start processing
-    processCollection(id, targetUsername, tokens, { allLabels, sampleSize }).catch(console.error);
+    // Trigger the Upstash workflow
+    const workflowUrl = `${process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'}/api/workflow`;
+    
+    try {
+      const workflowResponse = await fetch(workflowUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${process.env.QSTASH_TOKEN}`,
+        },
+        body: JSON.stringify({
+          jobId: id,
+          username: targetUsername,
+          tokens,
+          options: { allLabels, sampleSize }
+        }),
+      });
+
+      if (!workflowResponse.ok) {
+        console.error('Workflow trigger failed:', await workflowResponse.text());
+        // Fallback to direct processing if workflow fails
+        const { processCollection } = await import('@/lib/discogs');
+        processCollection(id, targetUsername, tokens, { allLabels, sampleSize }).catch(console.error);
+      }
+    } catch (workflowError) {
+      console.error('Failed to trigger workflow:', workflowError);
+      // Fallback to direct processing
+      const { processCollection } = await import('@/lib/discogs');
+      processCollection(id, targetUsername, tokens, { allLabels, sampleSize }).catch(console.error);
+    }
 
     return NextResponse.json({ runId: id });
   } catch (error) {

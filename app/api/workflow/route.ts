@@ -78,24 +78,30 @@ export const { POST } = serve<WorkflowInput>(async (context) => {
     return allReleases;
   });
 
-  // 6. Detailed Analysis Loop
-  // Note: We use context.run in batches to avoid timing out the serverless function
+  // 6. Detailed Analysis Loop (Batched for efficiency)
+  // Note: We process releases in batches to avoid hitting Upstash workflow step limits
   const countryCounts: Record<string, number> = {};
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const tableRowsMap = new Map<string, any>();
   const totalToProcess = releasesToAnalyze.length;
+  const BATCH_SIZE = 10; // Process 10 releases per workflow step
 
-  for (let i = 0; i < totalToProcess; i++) {
-    const item = releasesToAnalyze[i];
+  for (let i = 0; i < totalToProcess; i += BATCH_SIZE) {
+    const batch = releasesToAnalyze.slice(i, Math.min(i + BATCH_SIZE, totalToProcess));
     
-    // Perform detailed fetch as a step
-    const stats = await context.run(`analyze-item-${i}`, async () => {
+    // Process batch as a single step
+    const batchResults = await context.run(`analyze-batch-${Math.floor(i / BATCH_SIZE)}`, async () => {
+      const results: { country: string; labelsToAdd: { key: string; labelId: number; labelName: string; country: string }[] }[] = [];
+      
+      for (const item of batch) {
         let country = 'Unknown';
         try {
-            const dbReleaseRes = await client.database().getRelease(item.id);
-            country = normalizeCountry(dbReleaseRes.data.country);
+          // Add small delay within batch to avoid rate limiting
+          await new Promise(resolve => setTimeout(resolve, 200));
+          const dbReleaseRes = await client.database().getRelease(item.id);
+          country = normalizeCountry(dbReleaseRes.data.country);
         } catch (err) {
-            console.error(`Failed to fetch release ${item.id}`, err);
+          console.error(`Failed to fetch release ${item.id}`, err);
         }
 
         const labelsToAdd: { key: string; labelId: number; labelName: string; country: string }[] = [];
@@ -103,41 +109,45 @@ export const { POST } = serve<WorkflowInput>(async (context) => {
         const labelsToProcess = allLabelsMode ? (basicInfo.labels || []) : [basicInfo.labels?.[0]].filter(Boolean);
         
         for (const label of labelsToProcess) {
-            labelsToAdd.push({
-                key: `${label.id}::${country}`,
-                labelId: label.id,
-                labelName: label.name,
-                country
-            });
+          labelsToAdd.push({
+            key: `${label.id}::${country}`,
+            labelId: label.id,
+            labelName: label.name,
+            country
+          });
         }
 
-        return { country, labelsToAdd };
+        results.push({ country, labelsToAdd });
+      }
+      
+      return results;
     });
 
     // Update Aggregates (Local state in workflow persists between runs)
-    countryCounts[stats.country] = (countryCounts[stats.country] || 0) + 1;
-    for (const l of stats.labelsToAdd) {
+    for (const stats of batchResults) {
+      countryCounts[stats.country] = (countryCounts[stats.country] || 0) + 1;
+      for (const l of stats.labelsToAdd) {
         const existing = tableRowsMap.get(l.key);
         if (existing) {
-            existing.releaseCount++;
+          existing.releaseCount++;
         } else {
-            tableRowsMap.set(l.key, { ...l, releaseCount: 1 });
+          tableRowsMap.set(l.key, { ...l, releaseCount: 1 });
         }
+      }
     }
 
-    // Update Progress periodically
-    if ((i + 1) % 5 === 0 || (i + 1) === totalToProcess) {
-        await context.run(`update-progress-${i}`, async () => {
-            job.progress.releasesProcessed = i + 1;
-            job.progress.percent = 15 + ((i + 1) / totalToProcess) * 85;
-            job.progress.message = `Analyzing ${i + 1} of ${totalToProcess}`;
-            await jobQueue.set(jobId, job);
-        });
-    }
+    // Update Progress after each batch
+    const processedCount = Math.min(i + BATCH_SIZE, totalToProcess);
+    await context.run(`update-progress-${Math.floor(i / BATCH_SIZE)}`, async () => {
+      job.progress.releasesProcessed = processedCount;
+      job.progress.percent = 15 + (processedCount / totalToProcess) * 85;
+      job.progress.message = `Analyzing ${processedCount} of ${totalToProcess}`;
+      await jobQueue.set(jobId, job);
+    });
 
-    // Discogs rate limiting: Wait 1.5s using workflow sleep (Serverless function dies, Upstash waits)
-    if (i < totalToProcess - 1) {
-        await context.sleep(`sleep-${i}`, 1.5);
+    // Rate limiting: Wait between batches (serverless function dies, Upstash waits)
+    if (i + BATCH_SIZE < totalToProcess) {
+      await context.sleep(`sleep-batch-${Math.floor(i / BATCH_SIZE)}`, 2);
     }
   }
 
