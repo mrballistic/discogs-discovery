@@ -9,7 +9,6 @@ import {
   CircularProgress, 
   Button, 
   Alert,
-  Link as MuiLink,
   Chip
 } from "@mui/material";
 import { ArrowLeft, Download, RefreshCw } from "lucide-react";
@@ -18,6 +17,7 @@ import CssBaseline from '@mui/material/CssBaseline';
 
 import { MapChart } from "@/components/MapChart";
 import { LabelTable } from "@/components/LabelTable";
+import { Footer } from "@/components/Footer";
 import { JobStatus, LabelRow } from "@/lib/queue";
 
 const darkTheme = createTheme({
@@ -149,7 +149,7 @@ export default function Dashboard({ params }: DashboardProps) {
   return (
     <ThemeProvider theme={darkTheme}>
       <CssBaseline />
-      <Box sx={{ minHeight: '100vh' }}>
+      <Box sx={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
         {/* Full-width Header Image */}
         <Box 
           sx={{ 
@@ -181,7 +181,7 @@ export default function Dashboard({ params }: DashboardProps) {
             }} 
           />
         </Box>
-        <Container maxWidth="xl" sx={{ mt: 4 }}>
+        <Container maxWidth="xl" sx={{ mt: 4, mb: 8, flexGrow: 1 }}>
           {/* Header */}
           <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 4 }}>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
@@ -248,9 +248,6 @@ export default function Dashboard({ params }: DashboardProps) {
                   onCountryClick={setSelectedCountry}
                   selectedCountry={selectedCountry}
                 />
-                 <Typography variant="caption" sx={{ display: 'block', mt: 1, color: '#666' }}>
-                  Data provided by Discogs. <MuiLink href={`https://www.discogs.com/user/${status.username}/collection`} target="_blank">View on Discogs</MuiLink>
-                </Typography>
               </Box>
 
               {/* Table Section */}
@@ -261,6 +258,7 @@ export default function Dashboard({ params }: DashboardProps) {
             </Box>
           )}
         </Container>
+        <Footer />
       </Box>
     </ThemeProvider>
   );
