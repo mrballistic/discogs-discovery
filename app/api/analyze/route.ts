@@ -2,20 +2,30 @@ import { NextResponse } from 'next/server';
 import { v4 as uuidv4 } from 'uuid';
 import { processCollection } from '@/lib/discogs';
 import { jobQueue, JobStatus } from '@/lib/queue';
+import { getIronSession } from 'iron-session';
+import { sessionOptions, SessionData } from '@/lib/session';
+import { cookies } from 'next/headers';
 
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { username } = body;
+    const { username, allLabels } = body;
 
-    if (!username) {
+    const session = await getIronSession<SessionData>(await cookies(), sessionOptions);
+    const isLoggedIn = !!session.user;
+    
+    // If not logged in, username is mandatory.
+    // If logged in, username is optional (defaults to self).
+    if (!isLoggedIn && !username) {
       return NextResponse.json({ error: 'Username is required' }, { status: 400 });
     }
+
+    const targetUsername = (isLoggedIn && !username) ? session.user.username : (username || session.user?.username);
 
     const id = uuidv4();
     const job: JobStatus = {
       id,
-      username,
+      username: targetUsername,
       status: 'pending',
       progress: {
         message: 'Job created',
@@ -30,13 +40,13 @@ export async function POST(request: Request) {
 
     jobQueue.set(id, job);
 
-    // Start processing in background (fire and forget)
-    // In a real serverless env (Vercel), this might be killed. 
-    // For MVP/Node runtime, this works but isn't robust.
-    // Ideally we'd use a real worker or Vercel Functions with long timeout, 
-    // but the recursive / iterative nature needs a persistent process or step function.
-    // For local dev/MVP, this async call works fine.
-    processCollection(id, username).catch(console.error);
+    const tokens = isLoggedIn ? {
+      accessToken: session.user.accessToken,
+      accessTokenSecret: session.user.accessTokenSecret
+    } : undefined;
+
+    // Start processing
+    processCollection(id, targetUsername, tokens).catch(console.error);
 
     return NextResponse.json({ runId: id });
   } catch (error) {

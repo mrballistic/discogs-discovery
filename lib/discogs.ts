@@ -48,9 +48,33 @@ async function fetchWithRetry<T>(fn: () => Promise<T>, retries = 3, delay = RATE
   }
 }
 
-export async function processCollection(jobId: string, username: string) {
+export async function processCollection(
+  jobId: string, 
+  username: string, 
+  tokens?: { accessToken: string; accessTokenSecret: string },
+  options?: { allLabels?: boolean }
+) {
   const job = jobQueue.get(jobId);
   if (!job) return;
+
+  // Initializing Client:
+  // If we have tokens, use them! This allows private collection access.
+  let jobClient = client;
+  if (tokens) {
+      jobClient = new DiscogsClient({
+          auth: {
+              method: 'oauth',
+              level: 2,
+              consumerKey: process.env.DISCOGS_CONSUMER_KEY!,
+              consumerSecret: process.env.DISCOGS_CONSUMER_SECRET!,
+              accessToken: tokens.accessToken,
+              accessTokenSecret: tokens.accessTokenSecret,
+          },
+          userAgent: 'DiscogsDiscoveryMVP/0.1',
+      });
+  }
+
+  const allLabelsMode = !!options?.allLabels;
 
   try {
     job.status = 'processing';
@@ -59,7 +83,7 @@ export async function processCollection(jobId: string, username: string) {
     // 1. Fetch First Page to get totals
     // Using folder 0 (All)
     const firstPageRes = await fetchWithRetry(() => 
-      client.user().collection().getReleases(username, 0, { page: 1, per_page: 50 })
+      jobClient.user().collection().getReleases(username, 0, { page: 1, per_page: 50 })
     );
     const firstPage = firstPageRes.data;
     const totalPages = firstPage.pagination.pages;
@@ -74,7 +98,7 @@ export async function processCollection(jobId: string, username: string) {
     // 2. Fetch remaining pages
     for (let p = 2; p <= totalPages; p++) {
       const pageRes = await fetchWithRetry(() => 
-        client.user().collection().getReleases(username, 0, { page: p, per_page: 50 })
+        jobClient.user().collection().getReleases(username, 0, { page: p, per_page: 50 })
       );
       allReleases = allReleases.concat(pageRes.data.releases);
       
@@ -90,7 +114,7 @@ export async function processCollection(jobId: string, username: string) {
     // Map to aggregate data
     const countryCounts: Record<string, number> = {};
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const tableRows: any[] = [];
+    const tableRowsMap = new Map<string, any>();
     
     let processed = 0;
     
@@ -101,7 +125,7 @@ export async function processCollection(jobId: string, username: string) {
       try {
         // Fetch with Retry
         const dbReleaseRes = await fetchWithRetry(() => 
-          client.database().getRelease(releaseId)
+          jobClient.database().getRelease(releaseId)
         );
         country = normalizeCountry(dbReleaseRes.data.country);
       } catch (err: unknown) {
@@ -109,23 +133,23 @@ export async function processCollection(jobId: string, username: string) {
         // Keep unknown
       }
       
-      // Aggregates
+      // Aggregates for Map
       countryCounts[country] = (countryCounts[country] || 0) + 1;
       
       // Table Row Logic
       const basicInfo = item.basic_information;
-      const primaryLabel = basicInfo.labels?.[0]; // Mode 1: Primary label only
+      const labelsToProcess = allLabelsMode ? (basicInfo.labels || []) : [basicInfo.labels?.[0]].filter(Boolean);
       
-      if (primaryLabel) {
-        const key = `${primaryLabel.id}::${country}`;
-        const existing = tableRows.find(r => r.key === key);
+      for (const label of labelsToProcess) {
+        const key = `${label.id}::${country}`;
+        const existing = tableRowsMap.get(key);
         if (existing) {
           existing.releaseCount++;
         } else {
-          tableRows.push({
+          tableRowsMap.set(key, {
             key,
-            labelId: primaryLabel.id,
-            labelName: primaryLabel.name,
+            labelId: label.id,
+            labelName: label.name,
             country,
             releaseCount: 1
           });
@@ -134,13 +158,13 @@ export async function processCollection(jobId: string, username: string) {
 
       processed++;
       job.progress.releasesProcessed = processed;
-      job.progress.percent = 30 + (processed / totalItems) * 70;
+      job.progress.percent = 30 + (processed / (totalItems || 1)) * 70;
       job.progress.message = `Analyzing release ${processed} of ${totalItems}`;
     }
 
     job.result = {
       mapData: countryCounts,
-      tableRows: tableRows.sort((a, b) => b.releaseCount - a.releaseCount)
+      tableRows: Array.from(tableRowsMap.values()).sort((a, b) => b.releaseCount - a.releaseCount)
     };
     job.status = 'completed';
     job.progress.percent = 100;

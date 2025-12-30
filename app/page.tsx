@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { 
   TextField, 
@@ -37,7 +37,17 @@ const darkTheme = createTheme({
 export default function Home() {
   const [username, setUsername] = useState("");
   const [loading, setLoading] = useState(false);
+  const [user, setUser] = useState<{ isLoggedIn: boolean; username?: string } | null>(null);
   const router = useRouter();
+
+  useEffect(() => {
+    fetch('/api/auth/me')
+      .then(res => res.json())
+      .then(data => {
+        setUser(data);
+        if (data.username) setUsername(data.username);
+      });
+  }, []);
 
   const handleAnalyze = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -48,6 +58,8 @@ export default function Home() {
       const res = await fetch("/api/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        // If logged in and username matches self, or empty, backend handles it.
+        // We explicitly send username if user typed it.
         body: JSON.stringify({ username: username.trim() }),
       });
       
@@ -55,7 +67,7 @@ export default function Home() {
       if (data.runId) {
         router.push(`/run/${data.runId}`);
       } else {
-        alert("Failed to start analysis");
+        alert("Failed to start analysis: " + (data.error || 'Unknown error'));
       }
     } catch (err) {
       console.error(err);
@@ -63,6 +75,16 @@ export default function Home() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleLogin = () => {
+    window.location.href = "/api/auth/login";
+  };
+
+  const handleLogout = async () => {
+    await fetch('/api/auth/logout', { method: 'POST' });
+    setUser({ isLoggedIn: false });
+    setUsername("");
   };
 
   return (
@@ -75,7 +97,10 @@ export default function Home() {
           flexDirection: "column",
           alignItems: "center",
           justifyContent: "center",
-          background: "radial-gradient(circle at 50% 10%, #1a1a1a 0%, #0a0a0a 100%)",
+          backgroundImage: 'linear-gradient(rgba(0, 0, 0, 0.7), rgba(0, 0, 0, 0.7)), url("/background.jpg")',
+          backgroundSize: "cover",
+          backgroundPosition: "center",
+          backgroundRepeat: "no-repeat",
           p: 2,
         }}
       >
@@ -97,8 +122,33 @@ export default function Home() {
               Discogs Discovery
             </Typography>
             <Typography variant="body1" color="text.secondary" align="center" sx={{ mb: 4 }}>
-              Visualize your record collection by country of origin. Enter your Discogs username to begin.
+              Visualize your record collection by country of origin.
             </Typography>
+
+            {user?.isLoggedIn ? (
+               <Box sx={{ width: '100%', mb: 3, textAlign: 'center' }}>
+                 <Typography sx={{ color: '#10b981', mb: 2 }}>
+                   Connected as <strong>{user.username}</strong>
+                 </Typography>
+                 <Button variant="outlined" size="small" onClick={handleLogout} sx={{ color: '#666', borderColor: '#333' }}>
+                   Disconnect
+                 </Button>
+               </Box>
+            ) : (
+               <Box sx={{ width: '100%', mb: 4, display: 'flex', justifyContent: 'center' }}>
+                 <Button 
+                   variant="outlined" 
+                   onClick={handleLogin}
+                   sx={{ 
+                     borderColor: '#333', 
+                     color: '#fff', 
+                     '&:hover': { borderColor: '#fff' } 
+                   }}
+                 >
+                   Connect with Discogs (Optional)
+                 </Button>
+               </Box>
+            )}
 
             <Box component="form" onSubmit={handleAnalyze} sx={{ width: "100%" }}>
               <TextField
@@ -107,6 +157,7 @@ export default function Home() {
                 placeholder="Discogs Username (e.g., milkman)"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
+                helperText={user?.isLoggedIn ? "You can analyze other users too, or leave simple to analyze yourself." : "Enter a public username."}
                 sx={{ 
                   mb: 3,
                   '& .MuiOutlinedInput-root': {

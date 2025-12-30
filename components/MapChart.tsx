@@ -61,7 +61,6 @@ export function MapChart({ data, onCountryClick, selectedCountry }: MapChartProp
               // OR pass ISO codes if we can get them.
               
               // Let's rely on a helper to lookup counts.
-              const count = data[countryName] || 0;
               
               // Wait, our normalizer turns "USA" -> "US". 
               // The topojson probably has "United States of America". This is a mismatch risk.
