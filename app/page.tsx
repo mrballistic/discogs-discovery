@@ -1,66 +1,140 @@
-import Image from "next/image";
-import styles from "./page.module.css";
+"use client";
+
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { 
+  TextField, 
+  Button, 
+  Container, 
+  Typography, 
+  Box, 
+  Paper, 
+  CircularProgress 
+} from "@mui/material";
+import { Search } from "lucide-react";
+import { createTheme, ThemeProvider } from '@mui/material/styles';
+import CssBaseline from '@mui/material/CssBaseline';
+
+const darkTheme = createTheme({
+  palette: {
+    mode: 'dark',
+    primary: {
+      main: '#6366f1',
+    },
+    secondary: {
+      main: '#10b981',
+    },
+    background: {
+      default: '#0a0a0a',
+      paper: '#171717',
+    },
+  },
+  typography: {
+    fontFamily: 'Inter, sans-serif',
+  },
+});
 
 export default function Home() {
+  const [username, setUsername] = useState("");
+  const [loading, setLoading] = useState(false);
+  const router = useRouter();
+
+  const handleAnalyze = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!username.trim()) return;
+
+    setLoading(true);
+    try {
+      const res = await fetch("/api/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: username.trim() }),
+      });
+      
+      const data = await res.json();
+      if (data.runId) {
+        router.push(`/run/${data.runId}`);
+      } else {
+        alert("Failed to start analysis");
+      }
+    } catch (err) {
+      console.error(err);
+      alert("An error occurred");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
-    <div className={styles.page}>
-      <main className={styles.main}>
-        <Image
-          className={styles.logo}
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className={styles.intro}>
-          <h1>To get started, edit the page.tsx file.</h1>
-          <p>
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className={styles.ctas}>
-          <a
-            className={styles.primary}
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+    <ThemeProvider theme={darkTheme}>
+      <CssBaseline />
+      <Box
+        sx={{
+          minHeight: "100vh",
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+          background: "radial-gradient(circle at 50% 10%, #1a1a1a 0%, #0a0a0a 100%)",
+          p: 2,
+        }}
+      >
+        <Container maxWidth="sm">
+          <Paper
+            elevation={24}
+            sx={{
+              p: 6,
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              borderRadius: 4,
+              border: '1px solid #333',
+              background: 'rgba(23, 23, 23, 0.8)',
+              backdropFilter: 'blur(10px)',
+            }}
           >
-            <Image
-              className={styles.logo}
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className={styles.secondary}
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
-    </div>
+            <Typography variant="h3" fontWeight="bold" gutterBottom sx={{ background: 'linear-gradient(45deg, #fff, #888)', backgroundClip: 'text', textFillColor: 'transparent', color: 'transparent' }}>
+              Discogs Discovery
+            </Typography>
+            <Typography variant="body1" color="text.secondary" align="center" sx={{ mb: 4 }}>
+              Visualize your record collection by country of origin. Enter your Discogs username to begin.
+            </Typography>
+
+            <Box component="form" onSubmit={handleAnalyze} sx={{ width: "100%" }}>
+              <TextField
+                fullWidth
+                variant="outlined"
+                placeholder="Discogs Username (e.g., milkman)"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                sx={{ 
+                  mb: 3,
+                  '& .MuiOutlinedInput-root': {
+                    borderRadius: 2,
+                  }
+                }}
+              />
+              <Button
+                fullWidth
+                variant="contained"
+                size="large"
+                type="submit"
+                disabled={loading}
+                startIcon={loading ? <CircularProgress size={20} color="inherit" /> : <Search />}
+                sx={{
+                  py: 1.5,
+                  borderRadius: 2,
+                  fontSize: '1.1rem',
+                  textTransform: 'none',
+                  boxShadow: '0 4px 14px 0 rgba(99, 102, 241, 0.39)',
+                }}
+              >
+                {loading ? "Initializing..." : "Analyze Collection"}
+              </Button>
+            </Box>
+          </Paper>
+        </Container>
+      </Box>
+    </ThemeProvider>
   );
 }
